@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Byway route map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous" referrerpolicy="no-referrer">
+<style>
+  html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  #map { height: 100%; width: 100%; }
+
+  #legend {
+    position: absolute;
+    z-index: 1000;
+    bottom: 20px;
+    right: 10px;
+    background: #fff;
+    padding: 10px 12px;
+    border-radius: 6px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+    font-size: 13px;
+    line-height: 1.6;
+    max-width: 230px;
+  }
+  #legend h4 { margin: 0 0 6px 0; font-size: 13px; }
+  #legend .swatch { display: inline-block; width: 20px; height: 4px; margin-right: 6px; vertical-align: middle; }
+  #legend .note { margin-top: 8px; font-size: 11px; color: #555; }
+
+  #status {
+    position: absolute;
+    z-index: 1000;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    padding: 6px 14px;
+    border-radius: 6px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+    font-size: 13px;
+    color: #333;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="status"></div>
+
+<div id="legend">
+  <h4>Rights of way</h4>
+  <div><span class="swatch" style="background:#1565c0"></span>Bridleway</div>
+  <div><span class="swatch" style="background:#8e24aa"></span>Restricted byway</div>
+  <div><span class="swatch" style="background:#e53935"></span>Byway open to all traffic</div>
+  <div class="note">Data from OpenStreetMap contributors. Community-mapped — not the legal Definitive Map, and may be incomplete or wrong. Zoom in to load routes.</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+(function () {
+  "use strict";
+
+  // Centred on BA15 (Bradford-on-Avon). Adjust to taste.
+  var START_LATLNG = [51.3436, -2.2513];
+  var START_ZOOM = 13;
+  var MIN_ZOOM_FOR_DATA = 13;
+  var OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+
+  var COLORS = {
+    bridleway: "#1565c0",
+    restricted_byway: "#8e24aa",
+    boat: "#e53935"
+  };
+  var LABELS = {
+    bridleway: "Bridleway",
+    restricted_byway: "Restricted byway",
+    boat: "Byway open to all traffic"
+  };
+
+  var map = L.map("map").setView(START_LATLNG, START_ZOOM);
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors"
+  }).addTo(map);
+
+  var statusEl = document.getElementById("status");
+  function setStatus(text) {
+    if (!text) {
+      statusEl.style.display = "none";
+      return;
+    }
+    statusEl.textContent = text;
+    statusEl.style.display = "block";
+  }
+
+  var routeLayer = L.layerGroup().addTo(map);
+  var fetchToken = 0;
+  var debounceTimer = null;
+
+  function categorise(tags) {
+    tags = tags || {};
+    if (tags.designation === "restricted_byway") return "restricted_byway";
+    if (tags.designation === "byway_open_to_all_traffic") return "boat";
+    if (tags.designation === "public_bridleway" || tags.highway === "bridleway") return "bridleway";
+    return null;
+  }
+
+  function buildQuery(bounds) {
+    var bbox = [bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()].join(",");
+    return "[out:json][timeout:25];(" +
+      "way[\"highway\"=\"bridleway\"](" + bbox + ");" +
+      "way[\"designation\"=\"public_bridleway\"](" + bbox + ");" +
+      "way[\"designation\"=\"restricted_byway\"](" + bbox + ");" +
+      "way[\"designation\"=\"byway_open_to_all_traffic\"](" + bbox + ");" +
+      ");out geom;";
+  }
+
+  function loadRoutes() {
+    if (map.getZoom() < MIN_ZOOM_FOR_DATA) {
+      routeLayer.clearLayers();
+      setStatus("Zoom in to load route overlay (zoom " + MIN_ZOOM_FOR_DATA + "+)");
+      return;
+    }
+
+    var token = ++fetchToken;
+    setStatus("Loading route data…");
+
+    var query = buildQuery(map.getBounds());
+
+    fetch(OVERPASS_URL, {
+      method: "POST",
+      body: "data=" + encodeURIComponent(query)
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        if (token !== fetchToken) return; // a newer request superseded this one
+        routeLayer.clearLayers();
+
+        var count = 0;
+        (data.elements || []).forEach(function (el) {
+          if (el.type !== "way" || !el.geometry) return;
+          var category = categorise(el.tags);
+          if (!category) return;
+
+          var latlngs = el.geometry.map(function (pt) { return [pt.lat, pt.lon]; });
+          var line = L.polyline(latlngs, {
+            color: COLORS[category],
+            weight: 4,
+            opacity: 0.85
+          });
+
+          var name = (el.tags && (el.tags.name || el.tags.ref)) || null;
+          var popup = "<strong>" + LABELS[category] + "</strong>" + (name ? "<br>" + name : "");
+          line.bindPopup(popup);
+
+          line.addTo(routeLayer);
+          count++;
+        });
+
+        setStatus(count + " route" + (count === 1 ? "" : "s") + " loaded");
+        setTimeout(function () { if (token === fetchToken) setStatus(null); }, 2000);
+      })
+      .catch(function (err) {
+        if (token !== fetchToken) return;
+        setStatus("Failed to load route data (" + err.message + ") — will retry on next pan/zoom");
+      });
+  }
+
+  function scheduleLoad() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(loadRoutes, 600);
+  }
+
+  map.on("moveend", scheduleLoad);
+  loadRoutes();
+})();
+</script>
+
+</body>
+</html>
