@@ -40,12 +40,27 @@
     color: #333;
     display: none;
   }
+
+  #zoom-indicator {
+    position: absolute;
+    z-index: 1000;
+    top: 10px;
+    left: 10px;
+    background: #fff;
+    padding: 4px 10px;
+    border-radius: 6px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+    font-size: 13px;
+    color: #333;
+    font-variant-numeric: tabular-nums;
+  }
 </style>
 </head>
 <body>
 
 <div id="map"></div>
 <div id="status"></div>
+<div id="zoom-indicator">Zoom: —</div>
 
 <div id="legend">
   <h4>Rights of way</h4>
@@ -71,7 +86,6 @@
   var START_LATLNG = [51.3436, -2.2513];
   var START_ZOOM = 13;
   var MIN_ZOOM_FOR_DATA = 13;
-  var MIN_ZOOM_FOR_TRACKS = 15; // tracks are far more numerous than the ROW types — load them only once zoomed in
   var OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
@@ -127,6 +141,13 @@
   var fetchToken = 0;
   var debounceTimer = null;
 
+  var zoomEl = document.getElementById("zoom-indicator");
+  function updateZoomIndicator() {
+    zoomEl.textContent = "Zoom: " + map.getZoom();
+  }
+  updateZoomIndicator();
+  map.on("zoomend", updateZoomIndicator);
+
   function categorise(tags) {
     tags = tags || {};
     if (tags.designation === "restricted_byway") return "restricted_byway";
@@ -136,16 +157,14 @@
     return null;
   }
 
-  function buildQuery(bounds, includeTracks) {
+  function buildQuery(bounds) {
     var bbox = [bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()].join(",");
     var clauses =
       "way[\"highway\"=\"bridleway\"](" + bbox + ");" +
       "way[\"designation\"=\"public_bridleway\"](" + bbox + ");" +
       "way[\"designation\"=\"restricted_byway\"](" + bbox + ");" +
-      "way[\"designation\"=\"byway_open_to_all_traffic\"](" + bbox + ");";
-    if (includeTracks) {
-      clauses += "way[\"highway\"=\"track\"](" + bbox + ");";
-    }
+      "way[\"designation\"=\"byway_open_to_all_traffic\"](" + bbox + ");" +
+      "way[\"highway\"=\"track\"](" + bbox + ");";
     return "[out:json][timeout:25];(" + clauses + ");out geom;";
   }
 
@@ -157,10 +176,9 @@
     }
 
     var token = ++fetchToken;
-    var includeTracks = map.getZoom() >= MIN_ZOOM_FOR_TRACKS;
-    setStatus(includeTracks ? "Loading route data…" : "Loading route data… (zoom to " + MIN_ZOOM_FOR_TRACKS + "+ for tracks)");
+    setStatus("Loading route data…");
 
-    var query = buildQuery(map.getBounds(), includeTracks);
+    var query = buildQuery(map.getBounds());
 
     fetchOverpass(query)
       .then(function (data) {
