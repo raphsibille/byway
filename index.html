@@ -71,6 +71,7 @@
   var START_LATLNG = [51.3436, -2.2513];
   var START_ZOOM = 13;
   var MIN_ZOOM_FOR_DATA = 13;
+  var MIN_ZOOM_FOR_TRACKS = 15; // tracks are far more numerous than the ROW types — load them only once zoomed in
   var OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
   var COLORS = {
@@ -116,15 +117,17 @@
     return null;
   }
 
-  function buildQuery(bounds) {
+  function buildQuery(bounds, includeTracks) {
     var bbox = [bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()].join(",");
-    return "[out:json][timeout:25];(" +
+    var clauses =
       "way[\"highway\"=\"bridleway\"](" + bbox + ");" +
       "way[\"designation\"=\"public_bridleway\"](" + bbox + ");" +
       "way[\"designation\"=\"restricted_byway\"](" + bbox + ");" +
-      "way[\"designation\"=\"byway_open_to_all_traffic\"](" + bbox + ");" +
-      "way[\"highway\"=\"track\"](" + bbox + ");" +
-      ");out geom;";
+      "way[\"designation\"=\"byway_open_to_all_traffic\"](" + bbox + ");";
+    if (includeTracks) {
+      clauses += "way[\"highway\"=\"track\"](" + bbox + ");";
+    }
+    return "[out:json][timeout:25];(" + clauses + ");out geom;";
   }
 
   function loadRoutes() {
@@ -135,9 +138,10 @@
     }
 
     var token = ++fetchToken;
-    setStatus("Loading route data…");
+    var includeTracks = map.getZoom() >= MIN_ZOOM_FOR_TRACKS;
+    setStatus(includeTracks ? "Loading route data…" : "Loading route data… (zoom to " + MIN_ZOOM_FOR_TRACKS + "+ for tracks)");
 
-    var query = buildQuery(map.getBounds());
+    var query = buildQuery(map.getBounds(), includeTracks);
 
     fetch(OVERPASS_URL, {
       method: "POST",
