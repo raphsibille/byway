@@ -52,7 +52,8 @@
   <div><span class="swatch" style="background:#1565c0"></span>Bridleway</div>
   <div><span class="swatch" style="background:#8e24aa"></span>Restricted byway</div>
   <div><span class="swatch" style="background:#e53935"></span>Byway open to all traffic</div>
-  <div class="note">Data from OpenStreetMap contributors. Community-mapped — not the legal Definitive Map, and may be incomplete or wrong. Zoom in to load routes.</div>
+  <div><span class="swatch" style="background:#6d4c41"></span>Track</div>
+  <div class="note">Data from OpenStreetMap contributors. Community-mapped — not the legal Definitive Map, and may be incomplete or wrong. Tracks aren't a legal right of way in themselves — access varies. Zoom in to load routes.</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -75,12 +76,14 @@
   var COLORS = {
     bridleway: "#1565c0",
     restricted_byway: "#8e24aa",
-    boat: "#e53935"
+    boat: "#e53935",
+    track: "#6d4c41"
   };
   var LABELS = {
     bridleway: "Bridleway",
     restricted_byway: "Restricted byway",
-    boat: "Byway open to all traffic"
+    boat: "Byway open to all traffic",
+    track: "Track"
   };
 
   var map = L.map("map").setView(START_LATLNG, START_ZOOM);
@@ -109,6 +112,7 @@
     if (tags.designation === "restricted_byway") return "restricted_byway";
     if (tags.designation === "byway_open_to_all_traffic") return "boat";
     if (tags.designation === "public_bridleway" || tags.highway === "bridleway") return "bridleway";
+    if (tags.highway === "track") return "track";
     return null;
   }
 
@@ -119,6 +123,7 @@
       "way[\"designation\"=\"public_bridleway\"](" + bbox + ");" +
       "way[\"designation\"=\"restricted_byway\"](" + bbox + ");" +
       "way[\"designation\"=\"byway_open_to_all_traffic\"](" + bbox + ");" +
+      "way[\"highway\"=\"track\"](" + bbox + ");" +
       ");out geom;";
   }
 
